@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useStore, setState, createPlaylist, addToPlaylist, updatePlaylist, deletePlaylist, setDeck, clearSession, type Playlist, type View } from "../store";
 import { ContextMenu, KeyBadge, fmtBpm, type MenuItem } from "./common";
+import { Icon, BrandMark, type IconName } from "./Icon";
 
 function same(a: View, b: View) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -26,9 +27,9 @@ export function Sidebar() {
   }, [trackTags]);
 
   const go = (v: View) => setState({ view: v });
-  const Item = ({ v, icon, label, count, extra }: { v: View; icon: string; label: string; count?: number; extra?: React.ReactNode }) => (
+  const Item = ({ v, icon, label, count, extra }: { v: View; icon: IconName; label: string; count?: number; extra?: React.ReactNode }) => (
     <div className={`nav-item ${same(view, v) ? "active" : ""}`} onClick={() => go(v)}>
-      <span className="nav-icon">{icon}</span>
+      <span className="nav-icon"><Icon name={icon} /></span>
       <span className="ellipsis">{label}</span>
       {extra}
       {count != null && <span className="nav-count">{count}</span>}
@@ -75,7 +76,7 @@ export function Sidebar() {
               if (raw && p.kind !== "folder") { e.preventDefault(); addToPlaylist(p.id, JSON.parse(raw)); }
             }}
           >
-            <span className="nav-icon">{p.kind === "folder" ? (collapsed.has(p.id) ? "▸" : "▾") : p.kind === "set" ? "◆" : "▤"}</span>
+            <span className="nav-icon"><Icon name={p.kind === "folder" ? (collapsed.has(p.id) ? "chevronRight" : "chevronDown") : p.kind === "set" ? "set" : "crate"} /></span>
             <span className="ellipsis">{p.name}</span>
             {p.kind !== "folder" && <span className="nav-count">{p.entries.length}</span>}
           </div>
@@ -86,13 +87,13 @@ export function Sidebar() {
   return (
     <nav className="sidebar">
       <div className="brand">
-        <svg viewBox="0 0 32 32" width="26" height="26"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stopColor="#a78bfa" /><stop offset="1" stopColor="#f472b6" /></linearGradient></defs><circle cx="16" cy="16" r="14" fill="none" stroke="url(#g)" strokeWidth="3" /><circle cx="16" cy="16" r="5" fill="url(#g)" /><path d="M16 2 A14 14 0 0 1 30 16" stroke="#fff" strokeWidth="3" fill="none" opacity="0.5" /></svg>
+        <BrandMark />
         <span>Cratekeeper</span>
       </div>
 
       {deck && (
         <div className="live-card" onClick={() => setState({ selectedId: deck.id, selection: new Set([deck.id]) })}>
-          <div className="live-label"><span className="live-dot" /> LIVE · now playing</div>
+          <div className="live-label"><span className="live-dot" /> Live · now playing</div>
           <div className="ellipsis live-title">{deck.title}</div>
           <div className="row live-meta">
             <KeyBadge code={deck.musical_key} notation={notation} size="sm" />
@@ -107,19 +108,19 @@ export function Sidebar() {
       )}
 
       <div className="nav-section">
-        <Item v={{ type: "library" }} icon="♫" label="All tracks" count={tracks.length} />
-        {unanalyzed > 0 && <Item v={{ type: "unanalyzed" }} icon="◌" label="Needs analysis" count={unanalyzed} />}
-        <Item v={{ type: "wheel" }} icon="◐" label="Key wheel" />
-        <Item v={{ type: "cheatsheet" }} icon="✦" label="Cheat sheet" />
+        <Item v={{ type: "library" }} icon="library" label="All tracks" count={tracks.length} />
+        {unanalyzed > 0 && <Item v={{ type: "unanalyzed" }} icon="pending" label="Needs analysis" count={unanalyzed} />}
+        <Item v={{ type: "wheel" }} icon="wheel" label="Key wheel" />
+        <Item v={{ type: "cheatsheet" }} icon="book" label="Cheat sheet" />
       </div>
 
       <div className="nav-section">
         <div className="nav-head">
           <span>Crates & sets</span>
           <span className="nav-add">
-            <button title="New crate — a bucket of tracks" onClick={() => newList("crate")}>+▤</button>
-            <button title="New DJ set — an ordered tracklist" onClick={() => newList("set")}>+◆</button>
-            <button title="New folder" onClick={() => newList("folder")}>+▸</button>
+            <button title="New crate — a bucket of tracks" aria-label="New crate" onClick={() => newList("crate")}><Icon name="crate" size={14} /></button>
+            <button title="New DJ set — an ordered tracklist" aria-label="New DJ set" onClick={() => newList("set")}><Icon name="set" size={14} /></button>
+            <button title="New folder" aria-label="New folder" onClick={() => newList("folder")}><Icon name="folder" size={14} /></button>
           </span>
         </div>
         {playlists.length === 0 && <p className="nav-hint">Crates hold tracks by vibe. Sets are ordered tracklists with transition checks.</p>}
@@ -138,7 +139,7 @@ export function Sidebar() {
       </div>
 
       <div className="nav-section nav-bottom">
-        <Item v={{ type: "settings" }} icon="⚙" label="Settings" />
+        <Item v={{ type: "settings" }} icon="sliders" label="Settings" />
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </nav>

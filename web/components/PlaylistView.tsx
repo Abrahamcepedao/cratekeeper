@@ -4,8 +4,9 @@ import { transitionScore, scoreTone, keyColor } from "../keys";
 import { suggestNext } from "../suggest";
 import { KeyBadge, Editable, EnergyBar, fmtBpm, fmtDuration, Artwork } from "./common";
 import { TrackTable } from "./TrackTable";
-import { playTrack, previewMiddle } from "./Player";
+import { playTrack, previewMiddle, setVisibleList } from "./Player";
 import { buildFilter } from "../search";
+import { Icon } from "./Icon";
 
 export function PlaylistView({ playlist }: { playlist: Playlist }) {
   const tracks = useStore((s) => s.tracks);
@@ -18,19 +19,19 @@ export function PlaylistView({ playlist }: { playlist: Playlist }) {
     <div className="playlist-view">
       <div className="pl-header">
         <div>
-          <div className="pl-kind">{playlist.kind === "set" ? "◆ DJ SET" : "▤ CRATE"}</div>
+          <div className="pl-kind"><Icon name={playlist.kind === "set" ? "set" : "crate"} size={13} />{playlist.kind === "set" ? "DJ set" : "Crate"}</div>
           <Editable className="pl-name" value={playlist.name} onSave={(v) => v.trim() && updatePlaylist(playlist.id, { name: v.trim() })} />
           <div className="muted small">
-            {items.length} tracks · {fmtDuration(total)}{bpms.length ? ` · ${Math.min(...bpms)}–${Math.max(...bpms)} BPM` : ""}
+            {items.length} track{items.length === 1 ? "" : "s"}{total ? ` · ${fmtDuration(total)}` : ""}{bpms.length ? ` · ${Math.min(...bpms)}–${Math.max(...bpms)} BPM` : ""}
           </div>
         </div>
         <div className="pl-header-actions">
           {playlist.kind === "set" && items.length > 2 && (
             <button className="btn" title="Keep the first track, then greedily chain each next track by harmonic + tempo match" onClick={() => setEntries(playlist.id, harmonicOrder(items))}>
-              ✦ Harmonic auto-order
+              <Icon name="sparkle" size={14} />Harmonic auto-order
             </button>
           )}
-          <a className="btn" href={`/api/playlists/${playlist.id}/export.m3u8`} download title="Import in Rekordbox: File › Import › Import Playlist">⇩ Export for Rekordbox</a>
+          <a className="btn" href={`/api/playlists/${playlist.id}/export.m3u8`} download title="Import in Rekordbox: File › Import › Import Playlist"><Icon name="export" size={15} />Export for Rekordbox</a>
           <button className="btn btn-danger-ghost" onClick={() => confirm(`Delete “${playlist.name}”? Tracks stay in your library.`) && deletePlaylist(playlist.id)}>Delete</button>
         </div>
       </div>
@@ -80,6 +81,8 @@ function SetBuilder({ playlist, items }: { playlist: Playlist; items: { entry: E
   const tracks = useStore((s) => s.tracks);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
+  // In a set, "next track" follows the set order.
+  useEffect(() => setVisibleList(items.map((x) => x.track.id), playlist.name), [items, playlist.name]);
 
   const move = (from: number, to: number) => {
     const list = items.map((x) => x.entry);
@@ -150,7 +153,7 @@ function SetBuilder({ playlist, items }: { playlist: Playlist; items: { entry: E
               >
                 <span className="set-num">{i + 1}</span>
                 <span className="grip" title="Drag to reorder">⋮⋮</span>
-                <Artwork trackId={track.id} hasArt={!!track.has_artwork} size={38} />
+                <Artwork trackId={track.id} hasArt={!!track.has_artwork} size={38} keyCode={track.musical_key} />
                 <div className="set-main">
                   <div className="ellipsis">{track.title ?? track.filename}</div>
                   <div className="muted small ellipsis">{track.artist}{track.genre ? ` · ${track.genre}` : ""}</div>
@@ -160,8 +163,8 @@ function SetBuilder({ playlist, items }: { playlist: Playlist; items: { entry: E
                 <EnergyBar value={track.energy} />
                 <span className="mono muted small">{fmtDuration(track.duration)}</span>
                 <div className="set-actions">
-                  <button className="icon-btn" title="Preview" onClick={(e) => { e.stopPropagation(); previewMiddle(track.id); }}>▶</button>
-                  <button className="icon-btn" title="Remove from set" onClick={(e) => { e.stopPropagation(); remove(i); }}>×</button>
+                  <button className="icon-btn" title="Preview" aria-label="Preview" onClick={(e) => { e.stopPropagation(); previewMiddle(track.id); }}><Icon name="play" size={13} /></button>
+                  <button className="icon-btn" title="Remove from set" aria-label="Remove from set" onClick={(e) => { e.stopPropagation(); remove(i); }}><Icon name="close" size={14} /></button>
                 </div>
               </div>
             </React.Fragment>
@@ -182,8 +185,8 @@ function SetBuilder({ playlist, items }: { playlist: Playlist; items: { entry: E
                   <div className="muted small ellipsis">{s.artist}</div>
                   <div className="small muted ellipsis">{t.key?.label}</div>
                   <div className="next-actions">
-                    <button className="icon-btn" onClick={(e) => { e.stopPropagation(); previewMiddle(s.id); }}>▶</button>
-                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); addToPlaylist(playlist.id, [s.id]); }}>+ Add</button>
+                    <button className="icon-btn" aria-label="Preview" onClick={(e) => { e.stopPropagation(); previewMiddle(s.id); }}><Icon name="play" size={13} /></button>
+                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); addToPlaylist(playlist.id, [s.id]); }}><Icon name="plus" size={13} />Add</button>
                   </div>
                 </div>
               ))}

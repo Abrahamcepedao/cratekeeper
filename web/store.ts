@@ -62,6 +62,8 @@ export type State = {
   deckId: number | null;
   /** Tracks already played this session (excluded from suggestions). */
   played: number[];
+  /** "Next in queue": tracks you added; they play before the rest of the list you started from. */
+  upNext: number[];
   sort: { col: string; dir: 1 | -1 };
 };
 
@@ -81,12 +83,14 @@ let state: State = {
   toast: null,
   deckId: null,
   played: [],
+  upNext: [],
   sort: { col: "artist", dir: 1 },
 };
 try {
   const saved = JSON.parse(localStorage.getItem("ck-session") ?? "{}");
   if (saved.deckId !== undefined) state.deckId = saved.deckId;
   if (Array.isArray(saved.played)) state.played = saved.played;
+  if (Array.isArray(saved.upNext)) state.upNext = saved.upNext;
 } catch {}
 
 const listeners = new Set<() => void>();
@@ -94,8 +98,8 @@ export const getState = () => state;
 export function setState(patch: Partial<State> | ((s: State) => Partial<State>)) {
   const p = typeof patch === "function" ? patch(state) : patch;
   state = { ...state, ...p };
-  if ("deckId" in p || "played" in p) {
-    try { localStorage.setItem("ck-session", JSON.stringify({ deckId: state.deckId, played: state.played })); } catch {}
+  if ("deckId" in p || "played" in p || "upNext" in p) {
+    try { localStorage.setItem("ck-session", JSON.stringify({ deckId: state.deckId, played: state.played, upNext: state.upNext })); } catch {}
   }
   listeners.forEach((l) => l());
 }
@@ -140,6 +144,18 @@ export async function loadLibrary() {
     tt.get(track_id)!.add(tag_id);
   }
   setState({ loaded: true, tracks: d.tracks, tags: d.tags, trackTags: tt, playlists: d.playlists, settings: d.settings });
+}
+
+/** Human name for the list on screen, e.g. "All tracks · “key:8A”" — shown as "Next from: …" in the queue. */
+export function viewLabel(s: State): string {
+  const v = s.view;
+  let base = "All tracks";
+  if (v.type === "unanalyzed") base = "Needs analysis";
+  else if (v.type === "tag") base = `#${s.tags.find((t) => t.id === v.tagId)?.name ?? "tag"}`;
+  else if (v.type === "playlist") base = s.playlists.find((p) => p.id === v.id)?.name ?? "Playlist";
+  else if (v.type === "wheel") base = "Key wheel";
+  const q = s.query.trim();
+  return q ? `${base} · “${q}”` : base;
 }
 
 export function trackById(id: number | null | undefined): Track | undefined {
@@ -240,6 +256,34 @@ export async function addToPlaylist(id: number, trackIds: number[]) {
 export async function setEntries(id: number, entries: Entry[]) {
   setState((s) => ({ playlists: s.playlists.map((p) => (p.id === id ? { ...p, entries } : p)) }));
   await req("PUT", `/api/playlists/${id}/entries`, { entries });
+}
+
+/** Ask, then move the files to the Trash and drop the tracks from the library. */
+export async function confirmTrash(ids: number[]) {
+  if (!ids.length) return;
+  const first = trackById(ids[0]);
+  const what = ids.length === 1 ? `“${first?.title ?? first?.filename ?? "this track"}”` : `${ids.length} tracks`;
+  const ok = confirm(
+    `Move ${what} to the Trash?\n\n` +
+    `The file${ids.length > 1 ? "s go" : " goes"} to your Mac's Trash, so you can still Put Back until you empty it. ` +
+    `Tags, notes, ratings and places in crates and sets are removed from Cratekeeper.`,
+  );
+  if (!ok) return;
+  try {
+    const r = await req<{ removed: number[]; failed: { id: number; error: string }[] }>("POST", "/api/tracks/trash", { trackIds: ids });
+    const gone = new Set(r.removed);
+    await loadLibrary();
+    setState((s) => ({
+      selection: new Set([...s.selection].filter((id) => !gone.has(id))),
+      selectedId: s.selectedId != null && gone.has(s.selectedId) ? null : s.selectedId,
+      deckId: s.deckId != null && gone.has(s.deckId) ? null : s.deckId,
+      played: s.played.filter((id) => !gone.has(id)),
+    }));
+    if (r.failed.length) toast(`Couldn't trash ${r.failed.length} file${r.failed.length > 1 ? "s" : ""}: ${r.failed[0].error}`);
+    else toast(`Moved ${gone.size} track${gone.size === 1 ? "" : "s"} to the Trash`);
+  } catch (e: any) {
+    toast(e.message);
+  }
 }
 
 export function revealInFinder(id: number) {

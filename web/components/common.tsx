@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatKey, keyColor, type Notation } from "../keys";
 import type { Tag } from "../store";
+import { Icon } from "./Icon";
 
 export function KeyBadge({ code, notation, size = "md", dim }: { code: string | null | undefined; notation: Notation; size?: "sm" | "md" | "lg"; dim?: boolean }) {
   if (!code) return <span className={`key-badge key-${size} key-empty`}>—</span>;
@@ -37,7 +39,7 @@ export function EnergyBar({ value, onChange }: { value: number | null; onChange?
         <span
           key={i}
           className={i <= v ? "on" : ""}
-          style={i <= v ? { background: `hsl(${140 - i * 13}, 80%, 52%)` } : undefined}
+          style={i <= v ? { background: `hsl(${140 - i * 13}, 68%, 56%)` } : undefined}
           onMouseEnter={() => onChange && setHover(i)}
           onClick={(e) => { e.stopPropagation(); onChange?.(value === i ? null : i); }}
         />
@@ -68,13 +70,14 @@ export function fmtBpm(b: number | null | undefined) {
   return Number.isInteger(b) ? String(b) : b.toFixed(1);
 }
 
-export function Artwork({ trackId, hasArt, size = 40 }: { trackId: number; hasArt: boolean; size?: number }) {
+/** Cover art, or a small record whose label takes the track's key color. */
+export function Artwork({ trackId, hasArt, size = 40, keyCode }: { trackId: number; hasArt: boolean; size?: number; keyCode?: string | null }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [trackId]);
   if (!hasArt || failed)
     return (
-      <div className="art art-empty" style={{ width: size, height: size }}>
-        <svg viewBox="0 0 24 24" width={size * 0.5} height={size * 0.5}><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="12" cy="12" r="3" fill="currentColor" /></svg>
+      <div className={`art art-empty ${keyCode ? "keyed" : ""}`} style={{ width: size, height: size, ["--label" as any]: keyCode ? keyColor(keyCode) : undefined }}>
+        <i />
       </div>
     );
   return <img className="art" src={`/api/tracks/${trackId}/art`} width={size} height={size} onError={() => setFailed(true)} loading="lazy" alt="" />;
@@ -112,13 +115,15 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
-  return (
+  // Portaled: glass surfaces use backdrop-filter, which would otherwise trap fixed-position overlays.
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>{title}</h3><button className="icon-btn" onClick={onClose}>×</button></div>
+        <div className="modal-head"><h3>{title}</h3><button className="icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -135,8 +140,10 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
   }, [onClose]);
   const left = Math.min(x, window.innerWidth - 240);
   const top = Math.min(y, window.innerHeight - items.length * 32 - 20);
-  return (
-    <div className="ctx-menu" style={{ left, top }} onMouseDown={(e) => e.stopPropagation()}>
+  // Grow out of the click point, even when the menu had to shift to stay on screen.
+  const origin = `${x - left}px ${y - top}px`;
+  return createPortal(
+    <div className="ctx-menu ctx-root" style={{ left, top, transformOrigin: origin }} onMouseDown={(e) => e.stopPropagation()}>
       {items.map((it, i) =>
         it.divider ? <div key={i} className="ctx-divider" /> : (
           <div
@@ -147,7 +154,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
           >
             <span>{it.label}</span>
             {it.hint && <small>{it.hint}</small>}
-            {it.sub && <span className="ctx-arrow">›</span>}
+            {it.sub && <span className="ctx-arrow"><Icon name="chevronRight" size={14} /></span>}
             {it.sub && openSub === i && (
               <div className="ctx-menu ctx-sub">
                 {it.sub.length === 0 && <div className="ctx-item muted">Nothing here yet</div>}
@@ -159,6 +166,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
           </div>
         ),
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

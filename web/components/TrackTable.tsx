@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { setState, useStore, getState, setDeck, setTagOnTracks, addToPlaylist, revealInFinder, type Track } from "../store";
+import { setState, useStore, getState, setDeck, setTagOnTracks, addToPlaylist, revealInFinder, confirmTrash, viewLabel, type Track } from "../store";
 import { transitionScore, scoreTone, type Transition } from "../keys";
 import { KeyBadge, Stars, EnergyBar, TagChip, fmtBpm, fmtDuration, Artwork, ContextMenu, type MenuItem } from "./common";
-import { playTrack, previewMiddle } from "./Player";
+import { playTrack, previewMiddle, setVisibleList } from "./Player";
+import { queueTracks } from "../playback";
+import { Icon } from "./Icon";
 import { analyzeTracks } from "../analysis";
 
 const ROW_H = 46;
@@ -77,12 +79,17 @@ export function TrackTable({ tracks, reference, playlistId, emptyHint }: Props) 
     return () => ro.disconnect();
   }, []);
 
+  // What "next track" means: this list, in the order shown.
+  const label = useStore(viewLabel);
+  useEffect(() => setVisibleList(sorted.map((t) => t.id), label), [sorted, label]);
+
   // Keyboard navigation
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).closest("input, textarea, select")) return;
       const s = getState();
       const idx = sorted.findIndex((t) => t.id === s.selectedId);
+      if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return; // track skipping, handled globally
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const ni = Math.max(0, Math.min(sorted.length - 1, idx + (e.key === "ArrowDown" ? 1 : -1)));
@@ -94,6 +101,9 @@ export function TrackTable({ tracks, reference, playlistId, emptyHint }: Props) 
           if (top < el.scrollTop) el.scrollTop = top;
           else if (top + ROW_H > el.scrollTop + el.clientHeight - ROW_H) el.scrollTop = top - el.clientHeight + ROW_H * 2;
         }
+      } else if (e.key === "Backspace" && e.metaKey && s.selection.size) {
+        e.preventDefault();
+        confirmTrash([...s.selection]);
       } else if (e.key === "Enter" && s.selectedId != null) {
         playTrack(s.selectedId, 0);
       }
@@ -144,10 +154,15 @@ export function TrackTable({ tracks, reference, playlistId, emptyHint }: Props) 
       items.push({ label: deckId === one ? "✓ Now playing on deck" : "Set as now playing (live)", hint: "L", onClick: () => setDeck(one) });
       items.push({ divider: true, label: "" });
     }
+    items.push({ label: ids.length > 1 ? `Play ${ids.length} tracks next` : "Play next", hint: "⇧Q", onClick: () => queueTracks(ids, "next") });
+    items.push({ label: ids.length > 1 ? `Add ${ids.length} tracks to queue` : "Add to queue", hint: "Q", onClick: () => queueTracks(ids, "end") });
+    items.push({ divider: true, label: "" });
     items.push({ label: `Add ${ids.length > 1 ? ids.length + " tracks " : ""}to playlist`, sub: pls.map((p) => ({ label: `${p.kind === "set" ? "◆" : "▤"} ${p.name}`, onClick: () => addToPlaylist(p.id, ids) })) });
     items.push({ label: "Tag", sub: tags.map((tg) => ({ label: `${allTagged(tg.id) ? "✓ " : "  "}${tg.name}`, onClick: () => setTagOnTracks(tg.id, ids, allTagged(tg.id) ? "remove" : "add") })) });
     items.push({ label: ids.length > 1 ? `Re-analyze ${ids.length} tracks` : "Re-analyze key & BPM", onClick: () => analyzeTracks(ids, true) });
     if (one != null) items.push({ label: "Reveal in Finder", onClick: () => revealInFinder(one) });
+    items.push({ divider: true, label: "" });
+    items.push({ label: ids.length > 1 ? `Move ${ids.length} tracks to Trash…` : "Move to Trash…", hint: "⌘⌫", danger: true, onClick: () => confirmTrash(ids) });
     return items;
   };
 
@@ -211,9 +226,9 @@ export function TrackTable({ tracks, reference, playlistId, emptyHint }: Props) 
                 }}
               >
                 <span className="tt-play" onClick={(e) => { e.stopPropagation(); playTrack(t.id); }}>
-                  {playingId === t.id ? "♪" : deckId === t.id ? "◉" : "▶"}
+                  {playingId === t.id ? <span className="eq" aria-label="Playing"><i /><i /><i /></span> : <Icon name={deckId === t.id ? "live" : "play"} size={13} />}
                 </span>
-                <Artwork trackId={t.id} hasArt={!!t.has_artwork} size={34} />
+                <Artwork trackId={t.id} hasArt={!!t.has_artwork} size={34} keyCode={t.musical_key} />
                 {matches && m === undefined && <span className="match-self">{deckId === t.id ? "LIVE" : "—"}</span>}
                 {m !== undefined && (
                   <span className={`match match-${scoreTone(m.score)}`} title={`${m.key?.label ?? "No key"} · ${m.bpm?.label ?? "No BPM"}`}>
@@ -225,7 +240,7 @@ export function TrackTable({ tracks, reference, playlistId, emptyHint }: Props) 
                   switch (c.id) {
                     case "title": return (
                       <span key="title" className="tt-titlecell">
-                        <span className="ellipsis tt-title">{t.title ?? t.filename}{t.notes?.trim() ? <em className="note-dot" title={t.notes}>✎</em> : null}</span>
+                        <span className="ellipsis tt-title">{t.title ?? t.filename}{t.notes?.trim() ? <em className="note-dot" title={t.notes}><Icon name="note" size={12} /></em> : null}</span>
                         <span className="ellipsis muted tt-artist">{t.artist ?? "Unknown artist"}</span>
                       </span>
                     );

@@ -1,11 +1,14 @@
 import React, { useMemo, useState } from "react";
-import { useStore, updateTrack, setState, setDeck, createTag, setTagOnTracks, revealInFinder, addToPlaylist, type Track } from "../store";
+import { useStore, updateTrack, setState, setDeck, createTag, setTagOnTracks, revealInFinder, addToPlaylist, confirmTrash, type Track } from "../store";
 import { KeyBadge, Stars, EnergyBar, TagChip, Editable, Artwork, fmtBpm, fmtDuration } from "./common";
 import { KeyWheel } from "./KeyWheel";
-import { Waveform, playTrack, previewMiddle, audio } from "./Player";
+import { Waveform, playTrack, previewMiddle } from "./Player";
 import { normalizeKey, keyInfo, scoreTone } from "../keys";
 import { suggestNext } from "../suggest";
 import { analyzeTracks } from "../analysis";
+import { queueTracks } from "../playback";
+import { Icon } from "./Icon";
+import { keyColor } from "../keys";
 
 export function TrackPanel() {
   const track = useStore((s) => s.tracks.find((t) => t.id === s.selectedId));
@@ -19,7 +22,8 @@ export function TrackPanel() {
       </aside>
     );
   }
-  return <TrackDetail track={track} />;
+  // Keyed so the panel resets and eases in for each track.
+  return <TrackDetail key={track.id} track={track} />;
 }
 
 function TrackDetail({ track }: { track: Track }) {
@@ -67,17 +71,17 @@ function TrackDetail({ track }: { track: Track }) {
   const dur = track.duration;
 
   return (
-    <aside className="panel">
+    <aside className="panel" style={{ ["--key" as any]: track.musical_key ? keyColor(track.musical_key) : undefined }}>
       <div className="panel-head">
-        <Artwork trackId={track.id} hasArt={!!track.has_artwork} size={88} />
+        <Artwork trackId={track.id} hasArt={!!track.has_artwork} size={88} keyCode={track.musical_key} />
         <div className="panel-titles">
           <Editable className="panel-title" value={track.title ?? ""} placeholder={track.filename} onSave={(v) => updateTrack(track.id, { title: v })} />
           <Editable className="panel-artist" value={track.artist ?? ""} placeholder="Unknown artist" onSave={(v) => updateTrack(track.id, { artist: v })} />
           <div className="panel-actions">
-            <button className="btn btn-primary" onClick={() => playTrack(track.id, 0)}>▶ Play</button>
-            <button className="btn" onClick={() => previewMiddle(track.id)} title="Jump past the intro">Groove</button>
+            <button className="btn btn-primary" onClick={() => playTrack(track.id, 0)}><Icon name="play" size={13} />Play</button>
+            <button className="btn" onClick={() => previewMiddle(track.id)} title="Jump past the intro"><Icon name="waveform" size={14} />Groove</button>
             <button className={`btn ${deckId === track.id ? "btn-live" : ""}`} onClick={() => setDeck(deckId === track.id ? null : track.id)} title="Mark as the track playing in Rekordbox — the library will rank everything by how well it mixes out of this one">
-              {deckId === track.id ? "◉ Live" : "◎ Go live"}
+              <Icon name="live" size={14} />{deckId === track.id ? "Live" : "Go live"}
             </button>
           </div>
         </div>
@@ -121,7 +125,7 @@ function TrackDetail({ track }: { track: Track }) {
         </div>
       </div>
 
-      <Waveform trackId={track.id} height={40} onSeek={(f) => playTrack(track.id, f)} color={"#f472b6"} />
+      <Waveform trackId={track.id} height={40} onSeek={(f) => playTrack(track.id, f)} color={track.musical_key ? keyColor(track.musical_key) : undefined} />
 
       <div className="panel-grid">
         <label>Energy</label><EnergyBar value={track.energy} onChange={(v) => updateTrack(track.id, { energy: v })} />
@@ -130,7 +134,7 @@ function TrackDetail({ track }: { track: Track }) {
         <label>Album</label><Editable value={track.album ?? ""} placeholder="—" onSave={(v) => updateTrack(track.id, { album: v })} />
         <label>Label</label><Editable value={track.label ?? ""} placeholder="—" onSave={(v) => updateTrack(track.id, { label: v })} />
         <label>Year</label><Editable value={track.year ? String(track.year) : ""} placeholder="—" onSave={(v) => updateTrack(track.id, { year: v ? Number(v) || null : null } as any)} />
-        <label>File</label><span className="muted ellipsis file-line" title={track.rel_path}>{track.ext.toUpperCase()} · {track.bitrate ? `${track.bitrate} kbps · ` : ""}{fmtDuration(dur)} <button className="link" onClick={() => revealInFinder(track.id)}>Reveal</button></span>
+        <label>File</label><span className="muted file-line" title={track.rel_path}>{track.ext.toUpperCase()} · {track.bitrate ? `${track.bitrate} kbps · ` : ""}{fmtDuration(dur)} <button className="link" onClick={() => revealInFinder(track.id)}>Reveal</button> · <button className="link danger" onClick={() => confirmTrash([track.id])} title="Move the file to the Trash and remove it from Cratekeeper (⌘⌫)">Move to Trash</button></span>
       </div>
 
       <section>
@@ -176,7 +180,7 @@ function TrackDetail({ track }: { track: Track }) {
         <section>
           <h4>In playlists</h4>
           <div className="tag-row">
-            {inLists.map((p) => <button key={p.id} className="pl-chip" onClick={() => setState({ view: { type: "playlist", id: p.id } })}>{p.kind === "set" ? "◆" : "▤"} {p.name}</button>)}
+            {inLists.map((p) => <button key={p.id} className="pl-chip" onClick={() => setState({ view: { type: "playlist", id: p.id } })}><Icon name={p.kind === "set" ? "set" : "crate"} size={13} />{p.name}</button>)}
           </div>
         </section>
       )}
@@ -213,9 +217,10 @@ function TrackDetail({ track }: { track: Track }) {
                 <span className={`small rel rel-${t.key?.tone ?? "clash"}`}>{t.key?.short ?? "?"}</span>
               </div>
               <div className="sugg-actions">
-                <button className="icon-btn" title="Preview" onClick={(e) => { e.stopPropagation(); previewMiddle(s.id); }}>▶</button>
+                <button className="icon-btn" title="Preview" aria-label="Preview" onClick={(e) => { e.stopPropagation(); previewMiddle(s.id); }}><Icon name="play" size={13} /></button>
+                <button className="icon-btn" title="Add to queue" aria-label="Add to queue" onClick={(e) => { e.stopPropagation(); queueTracks([s.id], "end"); }}><Icon name="queueAdd" size={15} /></button>
                 {activeList?.kind === "set" && (
-                  <button className="icon-btn" title={`Add to ${activeList.name}`} onClick={(e) => { e.stopPropagation(); addToPlaylist(activeList.id, [s.id]); }}>+</button>
+                  <button className="icon-btn" title={`Add to ${activeList.name}`} aria-label={`Add to ${activeList.name}`} onClick={(e) => { e.stopPropagation(); addToPlaylist(activeList.id, [s.id]); }}><Icon name="plus" size={14} /></button>
                 )}
               </div>
             </div>
@@ -243,7 +248,7 @@ function BulkPanel({ ids }: { ids: number[] }) {
             const all = ids.every((id) => trackTags.get(id)?.has(t.id));
             return (
               <button key={t.id} className={`tag-ghost ${all ? "on" : ""}`} style={{ ["--tag" as any]: t.color }} onClick={() => setTagOnTracks(t.id, ids, all ? "remove" : "add")}>
-                {all ? "✓" : "+"} {t.name}
+                <Icon name={all ? "check" : "plus"} size={12} />{t.name}
               </button>
             );
           })}
@@ -263,12 +268,16 @@ function BulkPanel({ ids }: { ids: number[] }) {
       <section>
         <h4>Add to playlist</h4>
         <div className="tag-row">
-          {playlists.filter((p) => p.kind !== "folder").map((p) => <button key={p.id} className="pl-chip" onClick={() => addToPlaylist(p.id, ids)}>{p.kind === "set" ? "◆" : "▤"} {p.name}</button>)}
+          {playlists.filter((p) => p.kind !== "folder").map((p) => <button key={p.id} className="pl-chip" onClick={() => addToPlaylist(p.id, ids)}><Icon name={p.kind === "set" ? "set" : "crate"} size={13} />{p.name}</button>)}
           {!playlists.some((p) => p.kind !== "folder") && <span className="muted small">Create a crate or set in the sidebar first.</span>}
         </div>
       </section>
       <section>
-        <button className="btn" onClick={() => analyzeTracks(ids, true)}>Re-analyze key & BPM</button>
+        <div className="row">
+          <button className="btn" onClick={() => queueTracks(ids, "end")}><Icon name="queueAdd" size={15} />Add to queue</button>
+          <button className="btn" onClick={() => analyzeTracks(ids, true)}>Re-analyze key & BPM</button>
+          <button className="btn btn-danger-ghost" onClick={() => confirmTrash(ids)}>Move {ids.length} to Trash…</button>
+        </div>
       </section>
     </aside>
   );

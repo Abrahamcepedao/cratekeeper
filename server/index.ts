@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, statSync, rmSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { parseFile } from "music-metadata";
 import { db, DATA_DIR, getSetting, setSetting } from "./db";
@@ -127,6 +127,44 @@ api.post("/tracks/reset-analysis", async (c) => {
   const q = db.query("UPDATE tracks SET analyzed_at = NULL, analysis_error = NULL WHERE id = ?");
   for (const id of trackIds ?? []) q.run(id);
   return c.json({ ok: true });
+});
+
+/** Move tracks' files to the macOS Trash (recoverable with Put Back), then drop them from the library.
+ *  Tags, notes and playlist entries go with them. Only files inside the music folder are ever touched. */
+api.post("/tracks/trash", async (c) => {
+  const { trackIds } = await c.req.json();
+  if (!Array.isArray(trackIds) || !trackIds.length) return c.json({ error: "No tracks given" }, 422);
+  if (process.platform !== "darwin") return c.json({ error: "Moving files to the Trash is only supported on macOS." }, 422);
+  const root = resolve(getSetting("musicDir") ?? "");
+  const rows = trackIds
+    .map((id: number) => db.query("SELECT id, path FROM tracks WHERE id = ?").get(Number(id)) as { id: number; path: string } | null)
+    .filter(Boolean) as { id: number; path: string }[];
+  const failed: { id: number; error: string }[] = [];
+  const toTrash: { id: number; path: string }[] = [];
+  const removed: number[] = [];
+  for (const r of rows) {
+    if (!existsSync(r.path)) removed.push(r.id); // already gone from disk: just forget it
+    else if (!resolve(r.path).startsWith(root + sep)) failed.push({ id: r.id, error: "File is outside your music folder" });
+    else toTrash.push(r);
+  }
+  if (toTrash.length) {
+    const paths = toTrash.map((r) => r.path);
+    const cmd = existsSync("/usr/bin/trash")
+      ? ["/usr/bin/trash", ...paths]
+      : ["osascript", "-e", `tell application "Finder" to delete {${paths.map((p) => `POSIX file ${JSON.stringify(p)}`).join(", ")}}`];
+    const proc = Bun.spawn(cmd, { stdout: "ignore", stderr: "pipe" });
+    const err = (await new Response(proc.stderr).text()).trim();
+    await proc.exited;
+    // Trust the disk, not the exit code: a track leaves the library only if its file is really gone.
+    for (const r of toTrash) {
+      if (existsSync(r.path)) failed.push({ id: r.id, error: err || "Could not move the file to the Trash" });
+      else removed.push(r.id);
+    }
+  }
+  const del = db.query("DELETE FROM tracks WHERE id = ?");
+  db.transaction(() => { for (const id of removed) del.run(id); })();
+  for (const id of removed) for (const f of [`${id}.bin`, `${id}.bin.type`]) rmSync(join(DATA_DIR, "art", f), { force: true });
+  return c.json({ removed, failed });
 });
 
 api.get("/tracks/:id/peaks", (c) => {
