@@ -12,6 +12,7 @@ import { WheelView } from "./components/WheelView";
 import { SettingsView, FolderSetup } from "./components/SettingsView";
 import { analyzeUnanalyzed, stopAnalysis } from "./analysis";
 import { queueTracks } from "./playback";
+import { PanelResizer } from "./components/PanelResizer";
 import { KeyBadge, fmtBpm } from "./components/common";
 import { Icon, BrandMark } from "./components/Icon";
 import { keyColor, parseCamelot } from "./keys";
@@ -202,6 +203,7 @@ function App() {
         <div className="main-body">{main}</div>
       </main>
       {showPanel && <TrackPanel />}
+      {showPanel && <PanelResizer />}
       <Player />
       {toastMsg && <div className="toast">{toastMsg}</div>}
     </div>

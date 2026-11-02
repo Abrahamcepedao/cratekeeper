@@ -18,6 +18,15 @@ export { playTrack, togglePlay, previewMiddle, playNext, playPrev, setVisibleLis
 export function Waveform({ trackId, progress, onSeek, height = 44, color = ACCENT }: { trackId: number; progress?: number; onSeek?: (f: number) => void; height?: number; color?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [peaks, setPeaks] = useState<number[] | null>(null);
+  // Redraw when the canvas changes size (e.g. dragging the panel wider), so bars stay crisp.
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const ro = new ResizeObserver(() => setWidth(c.clientWidth));
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, []);
   const analyzedAt = useStore((s) => s.tracks.find((t) => t.id === trackId)?.analyzed_at);
   useEffect(() => {
     let alive = true;
@@ -49,7 +58,7 @@ export function Waveform({ trackId, progress, onSeek, height = 44, color = ACCEN
       g.fillStyle = played ? color : "rgba(255,255,255,0.18)";
       g.fillRect(i * bw, (h - bh) / 2, Math.max(1, bw - 0.6), bh);
     }
-  }, [peaks, progress, color]);
+  }, [peaks, progress, color, width]);
   return (
     <canvas
       ref={ref}

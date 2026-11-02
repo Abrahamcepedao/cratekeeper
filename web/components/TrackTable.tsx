@@ -83,6 +83,19 @@ export function TrackTable({ tracks, reference, playlistId, emptyHint }: Props) 
   const label = useStore(viewLabel);
   useEffect(() => setVisibleList(sorted.map((t) => t.id), label), [sorted, label]);
 
+  // When the selection jumps (e.g. "Back to now playing"), bring that row into view if it's off screen.
+  useEffect(() => {
+    const el = scroller.current;
+    const i = sorted.findIndex((t) => t.id === selectedId);
+    if (!el || i < 0) return;
+    const top = i * ROW_H;
+    const visibleBottom = el.scrollTop + el.clientHeight - 92; // the floating dock covers the last ~92px
+    if (top < el.scrollTop || top + ROW_H > visibleBottom) {
+      const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollTo({ top: Math.max(0, top - el.clientHeight / 3), behavior: smooth ? "smooth" : "auto" });
+    }
+  }, [selectedId]);
+
   // Keyboard navigation
   useEffect(() => {
     const h = (e: KeyboardEvent) => {

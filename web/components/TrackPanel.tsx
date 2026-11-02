@@ -3,12 +3,11 @@ import { useStore, updateTrack, setState, setDeck, createTag, setTagOnTracks, re
 import { KeyBadge, Stars, EnergyBar, TagChip, Editable, Artwork, fmtBpm, fmtDuration } from "./common";
 import { KeyWheel } from "./KeyWheel";
 import { Waveform, playTrack, previewMiddle } from "./Player";
-import { normalizeKey, keyInfo, scoreTone } from "../keys";
 import { suggestNext } from "../suggest";
 import { analyzeTracks } from "../analysis";
 import { queueTracks } from "../playback";
 import { Icon } from "./Icon";
-import { keyColor } from "../keys";
+import { keyColor, normalizeKey, keyInfo, scoreTone, compatibleKeys, formatKey } from "../keys";
 
 export function TrackPanel() {
   const track = useStore((s) => s.tracks.find((t) => t.id === s.selectedId));
@@ -26,6 +25,12 @@ export function TrackPanel() {
   return <TrackDetail key={track.id} track={track} />;
 }
 
+/** Hopping through "Mix next": where the chain started and where it is now (so Back can return to the start). */
+let explore: { origin: number; current: number } | null = null;
+
+/** The key move picked in "Mix next" (e.g. "+1"), kept as you click through tracks; null = best overall. */
+let lastMove: string | null = null;
+
 function TrackDetail({ track }: { track: Track }) {
   const notation = useStore((s) => s.settings.keyNotation);
   const tags = useStore((s) => s.tags);
@@ -39,6 +44,15 @@ function TrackDetail({ track }: { track: Track }) {
   const [tagInput, setTagInput] = useState("");
   const [editKey, setEditKey] = useState(false);
   const [scope, setScope] = useState<"library" | "playlist">("library");
+  const [move, setMoveState] = useState<string | null>(lastMove);
+  const setMove = (m: string | null) => { lastMove = m; setMoveState(m); };
+  const moves = useMemo(() => compatibleKeys(track.musical_key), [track.musical_key]);
+  const target = moves.find((m) => m.rel.short === move)?.code ?? null;
+  const keyCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of tracks) if (t.id !== track.id && t.musical_key) m.set(t.musical_key, (m.get(t.musical_key) ?? 0) + 1);
+    return m;
+  }, [tracks, track.id]);
 
   const myTags = [...(trackTags.get(track.id) ?? [])].map((id) => tags.find((t) => t.id === id)).filter(Boolean) as typeof tags;
   const inLists = playlists.filter((p) => p.entries.some((e) => e.trackId === track.id));
@@ -53,8 +67,9 @@ function TrackDetail({ track }: { track: Track }) {
       const ids = new Set(activeList.entries.map((e) => e.trackId));
       pool = tracks.filter((t) => ids.has(t.id));
     }
+    if (target) pool = pool.filter((t) => t.musical_key === target);
     return suggestNext(track, pool, exclude, 15);
-  }, [track, tracks, played, deckId, activeList, scope]);
+  }, [track, tracks, played, deckId, activeList, scope, target]);
 
   const suggestions1 = suggestions;
   const tagMatches = tagInput.trim() ? tags.filter((t) => t.name.toLowerCase().includes(tagInput.toLowerCase()) && !myTags.some((m) => m.id === t.id)).slice(0, 6) : [];
@@ -72,6 +87,7 @@ function TrackDetail({ track }: { track: Track }) {
 
   return (
     <aside className="panel" style={{ ["--key" as any]: track.musical_key ? keyColor(track.musical_key) : undefined }}>
+      <BackPill track={track} />
       <div className="panel-head">
         <Artwork trackId={track.id} hasArt={!!track.has_artwork} size={88} keyCode={track.musical_key} />
         <div className="panel-titles">
@@ -203,9 +219,36 @@ function TrackDetail({ track }: { track: Track }) {
           )}
         </div>
         {!track.musical_key && !track.bpm && <p className="muted small">Analyze this track to get suggestions.</p>}
+        {moves.length > 0 && (
+          <div className="move-chips" role="radiogroup" aria-label="Key to mix into">
+            <button role="radio" aria-checked={!target} className={`move-chip ${!target ? "on" : ""}`} onClick={() => setMove(null)} title="Best matches in any compatible key">Best</button>
+            {moves.map(({ code, rel }) => {
+              const n = keyCounts.get(code) ?? 0;
+              return (
+                <button
+                  key={code}
+                  role="radio"
+                  aria-checked={target === code}
+                  className={`move-chip ${target === code ? "on" : ""} ${n ? "" : "empty"}`}
+                  style={{ ["--k" as any]: keyColor(code) }}
+                  title={`${rel.label} → ${formatKey(code, notation)} · ${n} track${n === 1 ? "" : "s"}`}
+                  onClick={() => setMove(target === code ? null : rel.short)}
+                >
+                  <span className="move-rel">{rel.short}</span>
+                  <b>{formatKey(code, notation)}</b>
+                  <small>{n}</small>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {target && suggestions1.length === 0 && <p className="muted small">No analyzed tracks in {formatKey(target, notation)} to mix into yet.</p>}
         <div className="suggestions">
           {suggestions1.map(({ track: s, t }) => (
-            <div key={s.id} className="sugg" onClick={() => setState({ selectedId: s.id, selection: new Set([s.id]) })}>
+            <div key={s.id} className="sugg" onClick={() => {
+              explore = { origin: explore?.current === track.id ? explore.origin : track.id, current: s.id };
+              setState({ selectedId: s.id, selection: new Set([s.id]) });
+            }}>
               <span className={`sugg-score match-${scoreTone(t.score)}`}>{Math.round(t.score * 100)}</span>
               <div className="sugg-main">
                 <div className="ellipsis">{s.title ?? s.filename}</div>
@@ -228,6 +271,27 @@ function TrackDetail({ track }: { track: Track }) {
         </div>
       </section>
     </aside>
+  );
+}
+
+/** "Back to now playing" after exploring away from the playing song, or back to where a Mix next hop started. */
+function BackPill({ track }: { track: Track }) {
+  const notation = useStore((s) => s.settings.keyNotation);
+  const playing = useStore((s) => s.tracks.find((t) => t.id === s.playingId));
+  const origin = useStore((s) => (explore && explore.current === track.id ? s.tracks.find((t) => t.id === explore!.origin) : undefined));
+  const target = playing && playing.id !== track.id ? playing : origin && origin.id !== track.id ? origin : undefined;
+  if (!target) return null;
+  const go = () => {
+    explore = null;
+    setState({ selectedId: target.id, selection: new Set([target.id]) });
+  };
+  return (
+    <button className="back-pill" onClick={go} title={`Show “${target.title ?? target.filename}”`}>
+      <Icon name="back" size={14} />
+      <span className="back-label">{target === playing ? "Back to now playing" : "Back to"}</span>
+      <span className="ellipsis back-title">{target.title ?? target.filename}</span>
+      <KeyBadge code={target.musical_key} notation={notation} size="sm" />
+    </button>
   );
 }
 
