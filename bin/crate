@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# crate — open Cratekeeper, starting it in the background if it isn't running.
+#
+#   crate            start if needed, then open http://localhost:4747
+#   crate stop       stop the server
+#   crate restart    restart it (after pulling or editing code) and open it
+#   crate status     is it running?
+#
+# It keeps running after you close the terminal, until `crate stop` or a restart of the Mac.
+# Set NO_OPEN=1 to skip opening the browser. Logs: ~/Library/Logs/Cratekeeper/server.log
+
+set -uo pipefail
+
+PORT="${PORT:-4747}"
+URL="http://localhost:$PORT"
+# Resolve the repo through the ~/.local/bin symlink.
+SELF="$(readlink -f "$0" 2>/dev/null || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")"
+APP_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+LOG_DIR="$HOME/Library/Logs/Cratekeeper"
+BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
+
+up() { curl -fs -o /dev/null --max-time 2 "$URL/api/library"; }
+
+# PID of the Cratekeeper server on our port (and only if it is ours).
+server_pid() {
+  local pid
+  for pid in $(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null); do
+    ps -o command= -p "$pid" | grep -q "server/index.ts" && { echo "$pid"; return; }
+  done
+}
+
+start() {
+  if up; then return 0; fi
+  if lsof -ti "tcp:$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "crate: port $PORT is taken by something else."; exit 1
+  fi
+  [ -x "$BUN" ] || { echo "crate: Bun not found — install it from https://bun.sh"; exit 1; }
+  [ -d "$APP_DIR/node_modules" ] || (cd "$APP_DIR" && "$BUN" install >/dev/null)
+  mkdir -p "$LOG_DIR"
+  printf "Starting Cratekeeper"
+  (cd "$APP_DIR" && NO_OPEN=1 PORT="$PORT" nohup "$BUN" run server/index.ts >>"$LOG_DIR/server.log" 2>&1 & disown) 2>/dev/null
+  for _ in $(seq 1 40); do
+    if up; then echo " ✓"; return 0; fi
+    printf "."; sleep 0.25
+  done
+  echo; echo "crate: it didn't come up. Last log lines:"; tail -n 15 "$LOG_DIR/server.log"; exit 1
+}
+
+stop() {
+  local pid; pid="$(server_pid)"
+  if [ -z "$pid" ]; then echo "Cratekeeper isn't running."; return 0; fi
+  kill "$pid"
+  for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || { echo "Stopped Cratekeeper."; return 0; }; sleep 0.25; done
+  kill -9 "$pid" 2>/dev/null; echo "Stopped Cratekeeper (forced)."
+}
+
+open_app() { [ -n "${NO_OPEN:-}" ] || open "$URL"; echo "Cratekeeper → $URL"; }
+
+case "${1:-open}" in
+  open|start) start && open_app ;;
+  stop) stop ;;
+  restart) stop; start && open_app ;;
+  status) if up; then echo "Running → $URL (pid $(server_pid))"; else echo "Not running. Start it with: crate"; fi ;;
+  -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "crate: unknown command '$1' (try: crate, crate stop, crate restart, crate status)"; exit 1 ;;
+esac

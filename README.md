@@ -19,6 +19,8 @@ bun install
 bun start                                   # → http://localhost:4747
 ```
 
+**Shortcut:** link `bin/crate` onto your PATH (`ln -s "$PWD/bin/crate" ~/.local/bin/crate`), then just type `crate`. It starts the server in the background if needed and opens the app. Also: `crate stop`, `crate restart` (after code changes), `crate status`.
+
 On first launch, pick your music folder with **Browse…** or paste its path. Sub-folders are included. Analysis starts automatically and runs in the browser tab: roughly 1–3 seconds per track, two or three at a time. Keep the tab open until it's done. New files are picked up with **↻ Rescan**.
 
 ## What's inside
